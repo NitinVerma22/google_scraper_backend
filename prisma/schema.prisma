@@ -1,0 +1,223 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+enum Role {
+  ADMIN
+  OPERATOR
+}
+
+enum JobStatus {
+  PENDING
+  SEARCHING
+  FETCHING_DETAILS
+  APPLYING_FILTERS
+  SAVING_RESULTS
+  COMPLETED
+  COMPLETED_WITH_ERRORS
+  FAILED
+  CANCELLED
+}
+
+enum TaskStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+  RETRYING
+}
+
+enum ExportStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
+model User {
+  id           String        @id @default(uuid())
+  email        String        @unique
+  name         String
+  passwordHash String
+  role         Role          @default(OPERATOR)
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+
+  jobs         CollectionJob[]
+  savedFilters SavedFilter[]
+  exportJobs   ExportJob[]
+
+  @@map("users")
+}
+
+model CollectionJob {
+  id              String      @id @default(uuid())
+  userId          String
+  user            User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name            String
+  status          JobStatus   @default(PENDING)
+  
+  // Configurations stored as structured JSON
+  locationConfig  Json        // { country, state, city, locality, lat, lng, radiusKm, customQuery }
+  categoryConfig  Json        // { primaryCategory, categories: string[], customKeywords: string[] }
+  keywordConfig   Json?       // { keywords: string[], variations: string[] }
+  filterConfig    Json?       // { minRating, maxRating, minReviews, maxReviews, requirePhone, requireWebsite, openNow }
+  
+  targetCount     Int         @default(60)
+  selectedFields  String[]    // ["name", "formattedAddress", "phone", "website", "rating", "openingHours", etc.]
+  isMockMode      Boolean     @default(false)
+  
+  // Progress counters
+  discoveredCount Int         @default(0)
+  processedCount  Int         @default(0)
+  matchedCount    Int         @default(0)
+  failedCount     Int         @default(0)
+  requestCount    Int         @default(0)
+  estimatedCost   Float       @default(0.0)
+  errorMessage    String?
+  
+  startedAt       DateTime?
+  completedAt     DateTime?
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+
+  tasks           CollectionTask[]
+  jobResults      JobResult[]
+  apiUsageLogs    ApiUsageLog[]
+
+  @@index([userId])
+  @@index([status])
+  @@index([createdAt])
+  @@map("collection_jobs")
+}
+
+model CollectionTask {
+  id           String      @id @default(uuid())
+  jobId        String
+  job          CollectionJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  taskType     String      // "TEXT_SEARCH", "NEARBY_SEARCH", "PLACE_DETAILS", "PAGE_FETCH"
+  status       TaskStatus  @default(PENDING)
+  attempts     Int         @default(0)
+  maxAttempts  Int         @default(3)
+  payload      Json?
+  errorCode    String?
+  errorMessage String?
+  createdAt    DateTime    @default(now())
+  completedAt  DateTime?
+
+  @@index([jobId])
+  @@index([status])
+  @@map("collection_tasks")
+}
+
+model BusinessRecord {
+  id                 String      @id @default(uuid())
+  placeId            String      @unique
+  name               String
+  primaryType        String?
+  types              String[]
+  formattedAddress   String?
+  city               String?
+  state              String?
+  country            String?
+  postalCode         String?
+  latitude           Float?
+  longitude          Float?
+  googleMapsUrl      String?
+  rating             Float?
+  userRatingCount    Int?
+  phone              String?
+  internationalPhone String?
+  website            String?
+  businessStatus     String?     // "OPERATIONAL", "CLOSED_TEMPORARILY", etc.
+  openingHours       Json?       // { weekdayDescriptions, openNow }
+  priceLevel         String?
+  attributions       Json?
+  
+  firstSeenAt        DateTime    @default(now())
+  lastSeenAt         DateTime    @default(now())
+  createdAt          DateTime    @default(now())
+  updatedAt          DateTime    @updatedAt
+
+  jobResults         JobResult[]
+
+  @@index([city])
+  @@index([state])
+  @@index([country])
+  @@index([primaryType])
+  @@index([rating])
+  @@index([userRatingCount])
+  @@map("business_records")
+}
+
+model JobResult {
+  id               String         @id @default(uuid())
+  jobId            String
+  job              CollectionJob  @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  businessRecordId String
+  businessRecord   BusinessRecord @relation(fields: [businessRecordId], references: [id], onDelete: Cascade)
+  filterStatus     String         @default("MATCHED") // "MATCHED", "DISQUALIFIED"
+  processingStatus String         @default("COMPLETED")
+  createdAt        DateTime       @default(now())
+
+  @@unique([jobId, businessRecordId])
+  @@index([jobId])
+  @@index([businessRecordId])
+  @@map("job_results")
+}
+
+model ApiUsageLog {
+  id            String         @id @default(uuid())
+  jobId         String?
+  job           CollectionJob? @relation(fields: [jobId], references: [id], onDelete: SetNull)
+  endpoint      String         // "places:searchText", "places:details", "geocode"
+  requestCount  Int            @default(1)
+  statusCode    Int            @default(200)
+  durationMs    Int            @default(0)
+  estimatedCost Float          @default(0.0)
+  metadata      Json?
+  createdAt     DateTime       @default(now())
+
+  @@index([jobId])
+  @@index([endpoint])
+  @@index([createdAt])
+  @@map("api_usage_logs")
+}
+
+model SavedFilter {
+  id                  String   @id @default(uuid())
+  userId              String
+  user                User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name                String
+  filterConfiguration Json
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  @@index([userId])
+  @@map("saved_filters")
+}
+
+model ExportJob {
+  id             String       @id @default(uuid())
+  userId         String
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  status         ExportStatus @default(PENDING)
+  format         String       // "CSV", "XLSX"
+  selectedFields String[]
+  filterCriteria Json?
+  recordCount    Int          @default(0)
+  fileUrl        String?
+  fileName       String?
+  errorMessage   String?
+  createdAt      DateTime     @default(now())
+  completedAt    DateTime?
+
+  @@index([userId])
+  @@index([status])
+  @@map("export_jobs")
+}
