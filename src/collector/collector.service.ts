@@ -85,7 +85,7 @@ export class CollectorService {
     const locationConfig = job.locationConfig as unknown as LocationConfig;
     const categoryConfig = job.categoryConfig as unknown as CategoryConfig;
     const filterConfig = (job.filterConfig as unknown as FilterConfig) || {};
-    const selectedFields = job.selectedFields || [];
+    const selectedFields = (Array.isArray(job.selectedFields) ? job.selectedFields : []) as string[];
     const targetCount = job.targetCount || 50;
 
     let discoveredCount = 0;

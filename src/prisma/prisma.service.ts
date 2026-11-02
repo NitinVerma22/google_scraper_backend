@@ -17,9 +17,9 @@ export class PrismaService extends PrismaClient implements OnModuleInit, OnModul
     try {
       await this.$connect();
       this.connected = true;
-      this.logger.log('Successfully connected to PostgreSQL database (leadgen_db)');
+      this.logger.log('Successfully connected to MySQL database (leadgen_db)');
     } catch (error) {
-      this.logger.error('Failed to connect to PostgreSQL database', error);
+      this.logger.error('Failed to connect to MySQL database', error);
       throw error;
     }
   }
@@ -27,7 +27,7 @@ export class PrismaService extends PrismaClient implements OnModuleInit, OnModul
   async onModuleDestroy() {
     if (this.connected) {
       await this.$disconnect();
-      this.logger.log('Disconnected from PostgreSQL database');
+      this.logger.log('Disconnected from MySQL database');
     }
   }
 }

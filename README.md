@@ -4,7 +4,7 @@ Production-grade NestJS REST API with Server-Sent Events (SSE) and collector eng
 
 ## Architecture
 - **Framework:** NestJS 10 (TypeScript)
-- **Database:** PostgreSQL with Prisma ORM
+- **Database:** MySQL with Prisma ORM
 - **Queue/Workers:** BullMQ with Redis
 - **Real-Time:** Server-Sent Events (SSE)
 - **Documentation:** Swagger OpenAPI (`/api/docs`)
@@ -15,7 +15,7 @@ npm install
 npm run start:dev
 ```
 
-The API can start without PostgreSQL when `DATABASE_URL` is unset or
+The API can start without MySQL when `DATABASE_URL` is unset or
 `DATABASE_DISABLED=true`. In this mode, endpoints that read or write database
 data (including authentication, jobs, businesses, dashboard, exports, and
 usage) are unavailable. Configure `DATABASE_URL` and run `npx prisma generate`

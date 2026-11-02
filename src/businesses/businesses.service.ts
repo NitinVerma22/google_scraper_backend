@@ -36,9 +36,9 @@ export class BusinessesService {
 
     if (query.search) {
       where.OR = [
-        { name: { contains: query.search, mode: 'insensitive' } },
-        { formattedAddress: { contains: query.search, mode: 'insensitive' } },
-        { phone: { contains: query.search, mode: 'insensitive' } },
+        { name: { contains: query.search } },
+        { formattedAddress: { contains: query.search } },
+        { phone: { contains: query.search } },
       ];
     }
 
@@ -47,21 +47,21 @@ export class BusinessesService {
     }
 
     if (query.city) {
-      where.city = { equals: query.city, mode: 'insensitive' };
+      where.city = { equals: query.city };
     }
 
     if (query.state) {
-      where.state = { equals: query.state, mode: 'insensitive' };
+      where.state = { equals: query.state };
     }
 
     if (query.country) {
-      where.country = { equals: query.country, mode: 'insensitive' };
+      where.country = { equals: query.country };
     }
 
     if (query.category) {
       where.OR = [
-        { primaryType: { equals: query.category, mode: 'insensitive' } },
-        { types: { has: query.category } },
+        { primaryType: { equals: query.category } },
+        { types: { array_contains: query.category } },
       ];
     }
 
