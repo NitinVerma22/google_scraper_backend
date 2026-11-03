@@ -152,6 +152,18 @@ export class BusinessesService {
     return business;
   }
 
+  async getCategories(): Promise<string[]> {
+    const records = await this.prisma.businessRecord.findMany({
+      select: { primaryType: true },
+      distinct: ['primaryType'],
+      where: { primaryType: { not: null } },
+      orderBy: { primaryType: 'asc' },
+    });
+    return records
+      .map((r) => r.primaryType)
+      .filter((t): t is string => Boolean(t));
+  }
+
   async getSavedFilters(userId: string) {
     return this.prisma.savedFilter.findMany({
       where: { userId },

@@ -52,6 +52,14 @@ export class BusinessesController {
     return this.businessesService.deleteFilter(user.id, id);
   }
 
+  @Get('categories')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Get list of unique business categories available in the database' })
+  async getCategories() {
+    return this.businessesService.getCategories();
+  }
+
   @Get(':id')
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()

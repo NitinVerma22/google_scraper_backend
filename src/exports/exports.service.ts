@@ -10,6 +10,12 @@ export interface CreateExportDto {
   selectedFields?: string[];
   businessIds?: string[];
   jobId?: string;
+  category?: string;
+  city?: string;
+  search?: string;
+  minRating?: number | string;
+  hasPhone?: boolean | string;
+  hasWebsite?: boolean | string;
   filterCriteria?: any;
 }
 
@@ -31,7 +37,13 @@ export class ExportsService {
         status: 'PROCESSING',
         format: dto.format,
         selectedFields: dto.selectedFields || ['name', 'phone', 'website', 'rating', 'city', 'formattedAddress'],
-        filterCriteria: dto.filterCriteria || (dto.jobId ? { jobId: dto.jobId } : null),
+        filterCriteria: dto.filterCriteria || {
+          category: dto.category,
+          city: dto.city,
+          search: dto.search,
+          jobId: dto.jobId,
+          minRating: dto.minRating,
+        },
       },
     });
 
@@ -48,13 +60,56 @@ export class ExportsService {
       const where: any = {};
       if (dto.businessIds && dto.businessIds.length > 0) {
         where.id = { in: dto.businessIds };
-      } else if (dto.jobId) {
-        where.jobResults = { some: { jobId: dto.jobId } };
+      } else {
+        if (dto.jobId) {
+          where.jobResults = { some: { jobId: dto.jobId } };
+        }
+
+        const category = dto.category || dto.filterCriteria?.category;
+        if (category) {
+          where.OR = [
+            { primaryType: { equals: category } },
+            { types: { array_contains: category } },
+          ];
+        }
+
+        const city = dto.city || dto.filterCriteria?.city;
+        if (city) {
+          where.city = { equals: city };
+        }
+
+        const search = dto.search || dto.filterCriteria?.search;
+        if (search) {
+          where.OR = [
+            { name: { contains: search } },
+            { formattedAddress: { contains: search } },
+            { phone: { contains: search } },
+          ];
+        }
+
+        const minRating = dto.minRating ?? dto.filterCriteria?.minRating;
+        if (minRating !== undefined && minRating !== '') {
+          where.rating = { gte: Number(minRating) };
+        }
+
+        const hasPhone = dto.hasPhone ?? dto.filterCriteria?.hasPhone;
+        if (hasPhone === true || hasPhone === 'true') {
+          where.phone = { not: null };
+        } else if (hasPhone === false || hasPhone === 'false') {
+          where.phone = null;
+        }
+
+        const hasWebsite = dto.hasWebsite ?? dto.filterCriteria?.hasWebsite;
+        if (hasWebsite === true || hasWebsite === 'true') {
+          where.website = { not: null };
+        } else if (hasWebsite === false || hasWebsite === 'false') {
+          where.website = null;
+        }
       }
 
       const records = await this.prisma.businessRecord.findMany({
         where,
-        take: 5000,
+        take: 20000,
         orderBy: { createdAt: 'desc' },
       });
 
@@ -66,7 +121,14 @@ export class ExportsService {
       const rows = records.map((rec) => {
         const row: Record<string, any> = {};
         for (const f of fields) {
-          row[f] = (rec as any)[f] ?? 'N/A';
+          const val = (rec as any)[f];
+          if (Array.isArray(val)) {
+            row[f] = val.join(', ');
+          } else if (typeof val === 'object' && val !== null) {
+            row[f] = JSON.stringify(val);
+          } else {
+            row[f] = val ?? 'N/A';
+          }
         }
         return row;
       });
