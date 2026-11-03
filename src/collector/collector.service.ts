@@ -84,6 +84,7 @@ export class CollectorService {
 
     const locationConfig = job.locationConfig as unknown as LocationConfig;
     const categoryConfig = job.categoryConfig as unknown as CategoryConfig;
+    const keywordConfig = (job.keywordConfig as any) || {};
     const filterConfig = (job.filterConfig as unknown as FilterConfig) || {};
     const selectedFields = (Array.isArray(job.selectedFields) ? job.selectedFields : []) as string[];
     const targetCount = job.targetCount || 50;
@@ -148,35 +149,103 @@ export class CollectorService {
       // Check cancellation
       if (this.activeJobCancellations.has(jobId)) return;
 
-      const searchTerms: string[] = [];
-      const primaryCat = categoryConfig.primaryCategory || 'business';
-      const cityLocality = locationConfig.city || locationConfig.locality || '';
-      const catName = primaryCat.replace(/_/g, ' ');
-      searchTerms.push(`${catName} in ${cityLocality}`);
-      searchTerms.push(`best ${catName} in ${cityLocality}`);
-      searchTerms.push(`top ${catName} in ${cityLocality}`);
-      searchTerms.push(`${catName} near ${cityLocality}`);
+      // Collect and expand search terms across all selected categories, keywords, and geographic variations
+      const allCategories = new Set<string>();
+      if (categoryConfig.primaryCategory) allCategories.add(categoryConfig.primaryCategory);
+      if (Array.isArray(categoryConfig.categories)) {
+        categoryConfig.categories.forEach((c) => allCategories.add(c));
+      }
+      if (allCategories.size === 0) allCategories.add('business');
 
-      if (categoryConfig.customKeywords && categoryConfig.customKeywords.length > 0) {
-        for (const kw of categoryConfig.customKeywords) {
-          searchTerms.push(`${kw} in ${cityLocality}`);
-          searchTerms.push(`best ${kw} in ${cityLocality}`);
+      const allKeywords = new Set<string>();
+      if (Array.isArray(categoryConfig.customKeywords)) {
+        categoryConfig.customKeywords.forEach((k) => allKeywords.add(k));
+      }
+      if (keywordConfig?.keywords && Array.isArray(keywordConfig.keywords)) {
+        keywordConfig.keywords.forEach((k) => allKeywords.add(k));
+      }
+
+      const cityLocality = locationConfig.locality || locationConfig.city || '';
+      const state = locationConfig.state || '';
+
+      const locationVariations: string[] = [];
+      if (cityLocality) locationVariations.push(cityLocality);
+      if (locationConfig.locality && locationConfig.city && locationConfig.locality !== locationConfig.city) {
+        locationVariations.push(`${locationConfig.locality}, ${locationConfig.city}`);
+      }
+      if (cityLocality && state && cityLocality !== state) {
+        locationVariations.push(`${cityLocality}, ${state}`);
+      }
+      if (locationVariations.length === 0) locationVariations.push('city');
+
+      const searchTerms: string[] = [];
+      const addedTerms = new Set<string>();
+
+      const addTerm = (t: string) => {
+        const clean = t.trim();
+        if (clean && !addedTerms.has(clean.toLowerCase())) {
+          addedTerms.add(clean.toLowerCase());
+          searchTerms.push(clean);
+        }
+      };
+
+      for (const cat of allCategories) {
+        const catName = cat.replace(/_/g, ' ');
+        for (const loc of locationVariations) {
+          addTerm(`${catName} in ${loc}`);
+          addTerm(`best ${catName} in ${loc}`);
+          addTerm(`top ${catName} in ${loc}`);
+          addTerm(`${catName} near ${loc}`);
+          addTerm(`popular ${catName} in ${loc}`);
+          addTerm(`${catName} services in ${loc}`);
+          addTerm(`${catName} center in ${loc}`);
+          addTerm(`${catName} company in ${loc}`);
+          addTerm(`${catName} agency in ${loc}`);
+          addTerm(`verified ${catName} in ${loc}`);
+          addTerm(`leading ${catName} in ${loc}`);
+          addTerm(`affordable ${catName} in ${loc}`);
+          addTerm(`${catName} dealers in ${loc}`);
+          addTerm(`professional ${catName} in ${loc}`);
+        }
+      }
+
+      for (const kw of allKeywords) {
+        for (const loc of locationVariations) {
+          addTerm(`${kw} in ${loc}`);
+          addTerm(`best ${kw} in ${loc}`);
+          addTerm(`top ${kw} in ${loc}`);
+          addTerm(`${kw} near ${loc}`);
+        }
+      }
+
+      // Add quadrant/directional sub-searches for large target counts (>= 100)
+      if (targetCount >= 100 && cityLocality) {
+        const directions = ['north', 'south', 'east', 'west', 'central'];
+        for (const cat of allCategories) {
+          const catName = cat.replace(/_/g, ' ');
+          for (const dir of directions) {
+            addTerm(`${catName} in ${dir} ${cityLocality}`);
+            addTerm(`${catName} ${dir} ${cityLocality}`);
+          }
         }
       }
 
       const discoveredPlaceIds = new Set<string>();
       const candidatePlaces: any[] = [];
+      const targetDiscovered = filterConfig && (filterConfig.minRating || filterConfig.requirePhone || filterConfig.requireWebsite)
+        ? Math.ceil(targetCount * 1.35)
+        : targetCount;
 
       // 4. Execute Searches with Pagination and Multi-Page Crawling
       for (const term of searchTerms) {
         if (this.activeJobCancellations.has(jobId)) return;
-        if (discoveredPlaceIds.size >= targetCount) break;
+        if (discoveredPlaceIds.size >= targetDiscovered) break;
 
         let pageToken: string | undefined = undefined;
         let pageCount = 0;
         const maxPages = Math.ceil(targetCount / 20) + 1;
 
-        while (pageCount < maxPages && discoveredPlaceIds.size < targetCount) {
+        while (pageCount < maxPages && discoveredPlaceIds.size < targetDiscovered) {
           if (this.activeJobCancellations.has(jobId)) return;
           pageCount++;
 

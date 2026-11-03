@@ -53,7 +53,7 @@ export class JobsService {
       throw new BadRequestException('Job name, location, and category configurations are required');
     }
 
-    const targetCount = dto.targetCount > 0 ? Math.min(dto.targetCount, 500) : 60;
+    const targetCount = dto.targetCount > 0 ? Math.min(dto.targetCount, 2000) : 60;
     const selectedFields = dto.selectedFields?.length > 0 ? dto.selectedFields : ['name', 'phone', 'website', 'rating', 'formattedAddress'];
 
     const costEstimate = this.googlePlaces.estimateJobCost(targetCount, selectedFields);
