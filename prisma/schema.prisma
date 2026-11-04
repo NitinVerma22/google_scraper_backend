@@ -56,39 +56,49 @@ model User {
 }
 
 model CollectionJob {
-  id              String      @id @default(uuid())
-  userId          String
-  user            User        @relation(fields: [userId], references: [id], onDelete: Cascade)
-  name            String
-  status          JobStatus   @default(PENDING)
+  id                String      @id @default(uuid())
+  userId            String
+  user              User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name              String
+  status            JobStatus   @default(PENDING)
   
   // Configurations stored as structured JSON
-  locationConfig  Json        // { country, state, city, locality, lat, lng, radiusKm, customQuery }
-  categoryConfig  Json        // { primaryCategory, categories: string[], customKeywords: string[] }
-  keywordConfig   Json?       // { keywords: string[], variations: string[] }
-  filterConfig    Json?       // { minRating, maxRating, minReviews, maxReviews, requirePhone, requireWebsite, openNow }
+  locationConfig    Json        // { country, state, city, locality, lat, lng, radiusKm, customQuery }
+  categoryConfig    Json        // { primaryCategory, categories: string[], customKeywords: string[] }
+  keywordConfig     Json?       // { keywords: string[], variations: string[] }
+  filterConfig      Json?       // { minRating, maxRating, minReviews, maxReviews, requirePhone, requireWebsite, openNow }
   
-  targetCount     Int         @default(60)
-  selectedFields  Json        // ["name", "formattedAddress", "phone", "website", "rating", "openingHours", etc.]
-  isMockMode      Boolean     @default(false)
+  targetCount       Int         @default(60)
+  selectedFields    Json        // ["name", "formattedAddress", "phone", "website", "rating", "openingHours", etc.]
+  isMockMode        Boolean     @default(false)
   
   // Progress counters
-  discoveredCount Int         @default(0)
-  processedCount  Int         @default(0)
-  matchedCount    Int         @default(0)
-  failedCount     Int         @default(0)
-  requestCount    Int         @default(0)
-  estimatedCost   Float       @default(0.0)
-  errorMessage    String?     @db.Text
+  discoveredCount   Int         @default(0)
+  processedCount    Int         @default(0)
+  matchedCount      Int         @default(0)
+  failedCount       Int         @default(0)
+  requestCount      Int         @default(0)
+  estimatedCost     Float       @default(0.0)
+  errorMessage      String?     @db.Text
   
-  startedAt       DateTime?
-  completedAt     DateTime?
-  createdAt       DateTime    @default(now())
-  updatedAt       DateTime    @updatedAt
+  // Autonomous engine state & safety guardrails
+  isAutonomous      Boolean     @default(false)
+  isDryRun          Boolean     @default(false)
+  coverageScore     Float       @default(0.0)
+  maxBudgetUSD      Float?      @default(25.0)
+  maxRuntimeMinutes Int?        @default(120)
+  autonomousState   Json?
 
-  tasks           CollectionTask[]
-  jobResults      JobResult[]
-  apiUsageLogs    ApiUsageLog[]
+  startedAt         DateTime?
+  completedAt       DateTime?
+  createdAt         DateTime    @default(now())
+  updatedAt         DateTime    @updatedAt
+
+  tasks             CollectionTask[]
+  jobResults        JobResult[]
+  apiUsageLogs      ApiUsageLog[]
+  geoCells          GeoCell[]
+  decisionLogs      AutonomousDecisionLog[]
 
   @@index([userId])
   @@index([status])
@@ -100,11 +110,16 @@ model CollectionTask {
   id           String      @id @default(uuid())
   jobId        String
   job          CollectionJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
-  taskType     String      // "TEXT_SEARCH", "NEARBY_SEARCH", "PLACE_DETAILS", "PAGE_FETCH"
+  taskType     String      // "TEXT_SEARCH", "NEARBY_SEARCH", "PLACE_DETAILS", "PAGE_FETCH", etc.
   status       TaskStatus  @default(PENDING)
   attempts     Int         @default(0)
   maxAttempts  Int         @default(3)
+  priority     Int         @default(0)
+  runAt        DateTime    @default(now())
+  lockedAt     DateTime?
+  lockedBy     String?
   payload      Json?
+  result       Json?
   errorCode    String?
   errorMessage String?     @db.Text
   createdAt    DateTime    @default(now())
@@ -112,39 +127,47 @@ model CollectionTask {
 
   @@index([jobId])
   @@index([status])
+  @@index([status, runAt, priority])
   @@map("collection_tasks")
 }
 
 model BusinessRecord {
-  id                 String      @id @default(uuid())
-  placeId            String      @unique
-  name               String
-  primaryType        String?
-  types              Json
-  formattedAddress   String?     @db.Text
-  city               String?
-  state              String?
-  country            String?
-  postalCode         String?
-  latitude           Float?
-  longitude          Float?
-  googleMapsUrl      String?     @db.Text
-  rating             Float?
-  userRatingCount    Int?
-  phone              String?
-  internationalPhone String?
-  website            String?
-  businessStatus     String?     // "OPERATIONAL", "CLOSED_TEMPORARILY", etc.
-  openingHours       Json?       // { weekdayDescriptions, openNow }
-  priceLevel         String?
-  attributions       Json?
+  id                     String      @id @default(uuid())
+  placeId                String      @unique
+  name                   String
+  primaryType            String?
+  types                  Json
+  formattedAddress       String?     @db.Text
+  city                   String?
+  state                  String?
+  country                String?
+  postalCode             String?
+  latitude               Float?
+  longitude              Float?
+  googleMapsUrl          String?     @db.Text
+  rating                 Float?
+  userRatingCount        Int?
+  phone                  String?
+  internationalPhone     String?
+  website                String?
+  businessStatus         String?     // "OPERATIONAL", "CLOSED_TEMPORARILY", etc.
+  openingHours           Json?       // { weekdayDescriptions, openNow }
+  priceLevel             String?
+  attributions           Json?
   
-  firstSeenAt        DateTime    @default(now())
-  lastSeenAt         DateTime    @default(now())
-  createdAt          DateTime    @default(now())
-  updatedAt          DateTime    @updatedAt
+  // QR Review Studio lead intelligence fields
+  reviewOpportunityScore Float?
+  leadGrade              String?     // "HOT", "WARM", "NURTURE", "DISQUALIFIED"
+  locality               String?
+  discoverySource        String?     // "NEARBY_SEARCH", "LOCALITY_TEXT", "GRID_DISCOVERY"
+  geoCellId              String?
 
-  jobResults         JobResult[]
+  firstSeenAt            DateTime    @default(now())
+  lastSeenAt             DateTime    @default(now())
+  createdAt              DateTime    @default(now())
+  updatedAt              DateTime    @updatedAt
+
+  jobResults             JobResult[]
 
   @@index([city])
   @@index([state])
@@ -152,7 +175,79 @@ model BusinessRecord {
   @@index([primaryType])
   @@index([rating])
   @@index([userRatingCount])
+  @@index([reviewOpportunityScore])
+  @@index([leadGrade])
+  @@index([locality])
+  @@index([postalCode])
   @@map("business_records")
+}
+
+model GeoCell {
+  id              String         @id @default(uuid())
+  jobId           String
+  job             CollectionJob  @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  cellIndex       Int
+  centerLat       Float
+  centerLng       Float
+  radiusMeters    Float
+  localityName    String?
+  status          String         @default("PENDING") // PENDING, EXPLORING, COMPLETED, UNDER_EXPLORED, SATURATED, FAILED
+  isInsidePolygon Boolean        @default(true)
+  discoveredCount Int            @default(0)
+  duplicateCount  Int            @default(0)
+  attempts        Int            @default(0)
+  lastSearchedAt  DateTime?
+  createdAt       DateTime       @default(now())
+
+  @@index([jobId])
+  @@index([status])
+  @@map("geo_cells")
+}
+
+model AutonomousDecisionLog {
+  id          String         @id @default(uuid())
+  jobId       String
+  job         CollectionJob  @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  stage       String
+  strategy    String
+  locality    String?
+  cellId      String?
+  decision    String
+  reason      String         @db.Text
+  metrics     Json?
+  createdAt   DateTime       @default(now())
+
+  @@index([jobId])
+  @@index([createdAt])
+  @@map("autonomous_decision_logs")
+}
+
+model DiscoveryMemory {
+  id                  String    @id @default(uuid())
+  city                String
+  localityId          String?
+  strategy            String    // "NEARBY_DISTANCE", "LOCALITY_TEXT", "GRANULAR_TYPE", "CONTEXTUAL"
+  latitude            Float?
+  longitude           Float?
+  category            String
+  queryFingerprint    String    @unique // SHA-256(city + strategy + lat.toFixed(4) + lng.toFixed(4) + category + locality)
+  
+  discoveredPlaceIds  Json      // string[] of placeIds ever returned
+  uniqueResultCount   Int       @default(0)
+  duplicatePercentage Float     @default(0.0)
+  
+  lastSearchAt        DateTime  @default(now())
+  searchStatus        String    @default("ACTIVE") // "ACTIVE", "EXHAUSTED", "SATURATED", "FAILED"
+  nextRecommendedAction String? // "SWITCH_TO_LOCALITY", "SUBDIVIDE_QUADRANTS", "CHANGE_CATEGORY"
+  
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  @@index([city])
+  @@index([strategy])
+  @@index([category])
+  @@index([searchStatus])
+  @@map("discovery_memory")
 }
 
 model JobResult {
@@ -175,7 +270,7 @@ model ApiUsageLog {
   id            String         @id @default(uuid())
   jobId         String?
   job           CollectionJob? @relation(fields: [jobId], references: [id], onDelete: SetNull)
-  endpoint      String         // "places:searchText", "places:details", "geocode"
+  endpoint      String         // "places:searchText", "places:details", "places:searchNearby", "geocode"
   requestCount  Int            @default(1)
   statusCode    Int            @default(200)
   durationMs    Int            @default(0)

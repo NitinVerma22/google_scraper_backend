@@ -32,6 +32,17 @@ export interface SearchPlacesOptions {
   selectedFields?: string[];
 }
 
+export interface SearchNearbyOptions {
+  latitude: number;
+  longitude: number;
+  radiusMeters?: number;
+  includedTypes?: string[];
+  excludedTypes?: string[];
+  maxResultCount?: number;
+  rankPreference?: 'DISTANCE' | 'POPULARITY';
+  selectedFields?: string[];
+}
+
 @Injectable()
 export class GooglePlacesService {
   private readonly logger = new Logger(GooglePlacesService.name);
@@ -109,15 +120,12 @@ export class GooglePlacesService {
    * Estimate API cost for a collection job based on target count and selected fields
    */
   estimateJobCost(targetCount: number, selectedFields: string[]): { estimatedRequests: number; estimatedCostUSD: number; hasDetailsCalls: boolean } {
-    // Each search request returns up to 20 results
     const searchRequests = Math.ceil(targetCount / 20);
     const hasDetails = selectedFields.some((f) => DETAILS_ONLY_FIELDS.includes(f) || ['phone', 'website', 'openingHours', 'rating', 'userRatingCount'].includes(f));
     
-    // Base search pricing
     const searchRate = hasDetails ? GOOGLE_PRICING.TEXT_SEARCH_PRO : GOOGLE_PRICING.TEXT_SEARCH_ESSENTIALS;
     const searchCost = searchRequests * searchRate;
 
-    // Details calls if needed
     const detailsRequests = hasDetails ? targetCount : 0;
     const detailsCost = detailsRequests * GOOGLE_PRICING.PLACE_DETAILS_PRO;
 
@@ -171,7 +179,6 @@ export class GooglePlacesService {
       payload.pageToken = options.pageToken;
     }
 
-    const startTime = Date.now();
     try {
       const response = await this.executeWithRetry(() =>
         this.httpClient.post(url, payload, {
@@ -194,6 +201,70 @@ export class GooglePlacesService {
       };
     } catch (error: any) {
       this.logger.error(`Google Places Text Search failed: ${error?.response?.data?.error?.message || error.message}`);
+      throw error;
+    }
+  }
+
+  /**
+   * Search Places using Google Places API (New) Nearby Search
+   * Supports rankPreference: "DISTANCE" for true hyperlocal neighbourhood discovery
+   */
+  async searchPlacesNearby(options: SearchNearbyOptions): Promise<{
+    places: PlaceSearchResultItem[];
+    estimatedCost: number;
+    isMock: boolean;
+  }> {
+    if (this.isMockMode) {
+      return this.mockNearbySearch(options);
+    }
+
+    const fieldMask = this.buildFieldMask(options.selectedFields, false);
+    const url = 'https://places.googleapis.com/v1/places:searchNearby';
+
+    const payload: any = {
+      maxResultCount: Math.min(options.maxResultCount || 20, 20),
+      locationRestriction: {
+        circle: {
+          center: {
+            latitude: options.latitude,
+            longitude: options.longitude,
+          },
+          radius: options.radiusMeters || 1500,
+        },
+      },
+    };
+
+    if (options.includedTypes && options.includedTypes.length > 0) {
+      payload.includedTypes = options.includedTypes;
+    }
+
+    if (options.excludedTypes && options.excludedTypes.length > 0) {
+      payload.excludedTypes = options.excludedTypes;
+    }
+
+    payload.rankPreference = options.rankPreference || 'DISTANCE';
+
+    try {
+      const response = await this.executeWithRetry(() =>
+        this.httpClient.post(url, payload, {
+          headers: {
+            'X-Goog-Api-Key': this.apiKey,
+            'X-Goog-FieldMask': fieldMask,
+          },
+        }),
+      );
+
+      const places = response.data.places || [];
+      const hasDetailsFields = options.selectedFields?.some((f) => DETAILS_ONLY_FIELDS.includes(f));
+      const cost = hasDetailsFields ? GOOGLE_PRICING.TEXT_SEARCH_PRO : GOOGLE_PRICING.TEXT_SEARCH_ESSENTIALS;
+
+      return {
+        places,
+        estimatedCost: cost,
+        isMock: false,
+      };
+    } catch (error: any) {
+      this.logger.error(`Google Places Nearby Search failed: ${error?.response?.data?.error?.message || error.message}`);
       throw error;
     }
   }
@@ -275,7 +346,7 @@ export class GooglePlacesService {
       } catch (error: any) {
         attempt++;
         const status = error?.response?.status;
-        const isTransient = status === 429 || status === 500 || status === 503 || error.code === 'ECONNRESET';
+        const isTransient = status === 429 || status === 500 || status === 502 || status === 503 || status === 504 || error.code === 'ECONNRESET';
         
         if (!isTransient || attempt >= maxRetries) {
           throw error;
@@ -292,6 +363,65 @@ export class GooglePlacesService {
   // -------------------------------------------------------------
   // MOCK ENGINE FOR DEVELOPMENT & TESTING (ZERO CHARGES)
   // -------------------------------------------------------------
+  private mockNearbySearch(options: SearchNearbyOptions): {
+    places: PlaceSearchResultItem[];
+    estimatedCost: number;
+    isMock: boolean;
+  } {
+    const lat = options.latitude;
+    const lng = options.longitude;
+    const mockTypes = options.includedTypes && options.includedTypes.length > 0 ? options.includedTypes : ['dental_clinic', 'restaurant', 'beauty_salon'];
+    const selectedType = mockTypes[0] || 'local_business';
+
+    const places: PlaceSearchResultItem[] = [
+      {
+        id: `mock_nearby_${Math.round(lat * 1000)}_${Math.round(lng * 1000)}_1`,
+        displayName: { text: `Local ${selectedType.replace(/_/g, ' ')} Care Center`, languageCode: 'en' },
+        formattedAddress: `Colony Market, near coordinate (${lat.toFixed(4)}, ${lng.toFixed(4)}), Lucknow, UP`,
+        types: [selectedType, 'point_of_interest', 'establishment'],
+        primaryType: selectedType,
+        location: { latitude: lat + 0.002, longitude: lng + 0.001 },
+        googleMapsUri: 'https://maps.google.com/?cid=nearby1',
+        nationalPhoneNumber: '+91 98390 44556',
+        rating: 4.1,
+        userRatingCount: 22,
+        businessStatus: 'OPERATIONAL',
+      },
+      {
+        id: `mock_nearby_${Math.round(lat * 1000)}_${Math.round(lng * 1000)}_2`,
+        displayName: { text: `Neighbourhood ${selectedType.replace(/_/g, ' ')} Studio`, languageCode: 'en' },
+        formattedAddress: `Main Sector Road, Lucknow, UP`,
+        types: [selectedType, 'point_of_interest'],
+        primaryType: selectedType,
+        location: { latitude: lat - 0.003, longitude: lng + 0.002 },
+        googleMapsUri: 'https://maps.google.com/?cid=nearby2',
+        nationalPhoneNumber: '+91 94150 99887',
+        rating: 3.8,
+        userRatingCount: 14,
+        businessStatus: 'OPERATIONAL',
+      },
+      {
+        id: `mock_nearby_${Math.round(lat * 1000)}_${Math.round(lng * 1000)}_3`,
+        displayName: { text: `Standard ${selectedType.replace(/_/g, ' ')} Services`, languageCode: 'en' },
+        formattedAddress: `Bazar Block, Lucknow, UP`,
+        types: [selectedType, 'establishment'],
+        primaryType: selectedType,
+        location: { latitude: lat + 0.001, longitude: lng - 0.002 },
+        googleMapsUri: 'https://maps.google.com/?cid=nearby3',
+        nationalPhoneNumber: '+91 522 2788990',
+        rating: 4.4,
+        userRatingCount: 48,
+        businessStatus: 'OPERATIONAL',
+      },
+    ];
+
+    return {
+      places,
+      estimatedCost: 0.0,
+      isMock: true,
+    };
+  }
+
   private mockTextSearch(options: SearchPlacesOptions): {
     places: PlaceSearchResultItem[];
     nextPageToken?: string;

@@ -10,6 +10,7 @@ import { DashboardModule } from './dashboard/dashboard.module';
 import { ExportsModule } from './exports/exports.module';
 import { LocationsModule } from './locations/locations.module';
 import { UsageModule } from './usage/usage.module';
+import { AutonomousModule } from './autonomous/autonomous.module';
 
 @Module({
   imports: [
@@ -27,6 +28,7 @@ import { UsageModule } from './usage/usage.module';
     ExportsModule,
     LocationsModule,
     UsageModule,
+    AutonomousModule,
   ],
 })
 export class AppModule {}

@@ -8,6 +8,10 @@ export interface BusinessQueryDto {
   state?: string;
   country?: string;
   category?: string;
+  leadGrade?: string;
+  minOpportunityScore?: number;
+  locality?: string;
+  postalCode?: string;
   minRating?: number;
   maxRating?: number;
   minReviews?: number;
@@ -63,6 +67,22 @@ export class BusinessesService {
         { primaryType: { equals: query.category } },
         { types: { array_contains: query.category } },
       ];
+    }
+
+    if (query.leadGrade) {
+      where.leadGrade = query.leadGrade;
+    }
+
+    if (query.minOpportunityScore !== undefined) {
+      where.reviewOpportunityScore = { gte: Number(query.minOpportunityScore) };
+    }
+
+    if (query.locality) {
+      where.locality = { contains: query.locality };
+    }
+
+    if (query.postalCode) {
+      where.postalCode = query.postalCode;
     }
 
     if (query.minRating !== undefined || query.maxRating !== undefined) {
@@ -122,12 +142,10 @@ export class BusinessesService {
 
     return {
       items,
-      pagination: {
-        page,
-        limit,
-        total,
-        totalPages: Math.ceil(total / limit),
-      },
+      total,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit),
     };
   }
 
@@ -138,7 +156,7 @@ export class BusinessesService {
         jobResults: {
           include: {
             job: {
-              select: { id: true, name: true, createdAt: true, status: true },
+              select: { id: true, name: true, createdAt: true },
             },
           },
         },
@@ -146,28 +164,26 @@ export class BusinessesService {
     });
 
     if (!business) {
-      throw new NotFoundException(`Business record with ID ${id} not found`);
+      throw new NotFoundException(`Business with ID ${id} not found`);
     }
 
     return business;
   }
 
-  async getCategories(): Promise<string[]> {
+  async getCategories() {
     const records = await this.prisma.businessRecord.findMany({
       select: { primaryType: true },
       distinct: ['primaryType'],
       where: { primaryType: { not: null } },
-      orderBy: { primaryType: 'asc' },
     });
-    return records
-      .map((r) => r.primaryType)
-      .filter((t): t is string => Boolean(t));
+
+    return records.map((r) => r.primaryType).filter(Boolean);
   }
 
   async getSavedFilters(userId: string) {
     return this.prisma.savedFilter.findMany({
       where: { userId },
-      orderBy: { updatedAt: 'desc' },
+      orderBy: { createdAt: 'desc' },
     });
   }
 
@@ -181,9 +197,28 @@ export class BusinessesService {
     });
   }
 
-  async deleteFilter(userId: string, filterId: string) {
+  async deleteFilter(userId: string, id: string) {
     return this.prisma.savedFilter.deleteMany({
-      where: { id: filterId, userId },
+      where: { id, userId },
     });
+  }
+
+  async getStats() {
+    const [totalBusinesses, totalWithPhone, totalWithWebsite, avgRating] = await Promise.all([
+      this.prisma.businessRecord.count(),
+      this.prisma.businessRecord.count({ where: { phone: { not: null } } }),
+      this.prisma.businessRecord.count({ where: { website: { not: null } } }),
+      this.prisma.businessRecord.aggregate({
+        _avg: { rating: true },
+        where: { rating: { not: null } },
+      }),
+    ]);
+
+    return {
+      totalBusinesses,
+      totalWithPhone,
+      totalWithWebsite,
+      averageRating: avgRating._avg.rating ? Number(avgRating._avg.rating.toFixed(2)) : 0,
+    };
   }
 }
