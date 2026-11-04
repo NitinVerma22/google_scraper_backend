@@ -414,6 +414,75 @@ export class AutonomousService {
       for (const place of strategyResult.places) {
         returnedPlaceIds.push(place.id);
 
+        // 1. Resolve Detailed Locality, City, State, and Postal Code from address components
+        let localityName: string | null = payload.localityName || null;
+        let cityName = 'Lucknow';
+        let stateName = 'Uttar Pradesh';
+        let postalCode: string | null = null;
+
+        if (Array.isArray(place.addressComponents)) {
+          const sublocality = place.addressComponents.find((c: any) =>
+            c.types?.includes('sublocality_level_1') ||
+            c.types?.includes('sublocality') ||
+            c.types?.includes('neighborhood'),
+          );
+          if (sublocality?.longText) {
+            localityName = sublocality.longText;
+          }
+
+          const cityComp = place.addressComponents.find((c: any) =>
+            c.types?.includes('locality') ||
+            c.types?.includes('administrative_area_level_3'),
+          );
+          if (cityComp?.longText) {
+            cityName = cityComp.longText;
+          }
+
+          const stateComp = place.addressComponents.find((c: any) =>
+            c.types?.includes('administrative_area_level_1'),
+          );
+          if (stateComp?.longText) {
+            stateName = stateComp.longText;
+          }
+
+          const postalComp = place.addressComponents.find((c: any) =>
+            c.types?.includes('postal_code'),
+          );
+          if (postalComp?.longText || postalComp?.shortText) {
+            postalCode = postalComp.longText || postalComp.shortText;
+          }
+        }
+
+        // Fallbacks from formattedAddress if addressComponents was partial
+        if (!postalCode && place.formattedAddress) {
+          const pinMatch = place.formattedAddress.match(/\b(226\d{3})\b/);
+          if (pinMatch) postalCode = pinMatch[1];
+        }
+
+        if (!localityName && place.formattedAddress) {
+          const parts = place.formattedAddress.split(',').map((p: string) => p.trim());
+          const lkoIdx = parts.findIndex((p: string) => /lucknow/i.test(p));
+          if (lkoIdx > 0) {
+            localityName = parts[lkoIdx - 1];
+          }
+        }
+
+        const phone = place.nationalPhoneNumber?.trim() || null;
+        const website = place.websiteUri?.trim() || null;
+        const rating = place.rating !== undefined ? place.rating : null;
+        const userRatingCount = place.userRatingCount !== undefined ? place.userRatingCount : null;
+
+        // Calculate QR Review Studio Opportunity Score (prioritizes low reviews & vulnerable ratings)
+        const scoreResult = this.opportunityScorer.scoreBusinessLead({
+          name: place.displayName?.text || 'Local Business',
+          rating,
+          userRatingCount,
+          phone,
+          website,
+          businessStatus: place.businessStatus || 'OPERATIONAL',
+          primaryType: place.primaryType || payload.categoryLabel,
+        });
+
         const existing = await this.prisma.businessRecord.findUnique({
           where: { placeId: place.id },
         });
@@ -435,34 +504,35 @@ export class AutonomousService {
               processingStatus: 'COMPLETED',
             },
           });
+
+          // Enrich existing record if it was previously saved with null phone, rating, website, or locality
+          const shouldEnrich =
+            (!existing.phone && phone) ||
+            (!existing.website && website) ||
+            (existing.rating === null && rating !== null) ||
+            (existing.userRatingCount === null && userRatingCount !== null) ||
+            (!existing.locality && localityName);
+
+          if (shouldEnrich) {
+            await this.prisma.businessRecord.update({
+              where: { id: existing.id },
+              data: {
+                phone: existing.phone || phone,
+                website: existing.website || website,
+                rating: existing.rating ?? rating,
+                userRatingCount: existing.userRatingCount ?? userRatingCount,
+                locality: existing.locality || localityName,
+                postalCode: existing.postalCode || postalCode,
+                reviewOpportunityScore: scoreResult.score,
+                leadGrade: scoreResult.leadGrade,
+              },
+            });
+          }
           continue;
         }
 
         // Net-New Business Discovered
         uniqueNewCount++;
-
-        // Parse PIN code if available
-        let postalCode: string | undefined = undefined;
-        if (Array.isArray(place.addressComponents)) {
-          const postalComp = place.addressComponents.find((c: any) => c.types?.includes('postal_code'));
-          if (postalComp?.longText || postalComp?.shortText) {
-            postalCode = postalComp.longText || postalComp.shortText;
-          }
-        }
-        if (!postalCode && place.formattedAddress) {
-          const pinMatch = place.formattedAddress.match(/\b(226\d{3})\b/);
-          if (pinMatch) postalCode = pinMatch[1];
-        }
-
-        // Calculate QR Review Studio Opportunity Score
-        const scoreResult = this.opportunityScorer.scoreBusinessLead({
-          name: place.displayName?.text || 'Local Business',
-          rating: place.rating,
-          userRatingCount: place.userRatingCount,
-          phone: place.nationalPhoneNumber,
-          businessStatus: place.businessStatus,
-          primaryType: place.primaryType,
-        });
 
         const newRecord = await this.prisma.businessRecord.create({
           data: {
@@ -471,22 +541,22 @@ export class AutonomousService {
             primaryType: place.primaryType || payload.categoryLabel || 'local_business',
             types: place.types || [],
             formattedAddress: place.formattedAddress,
-            city: 'Lucknow',
-            state: 'Uttar Pradesh',
+            city: cityName,
+            state: stateName,
             country: 'India',
-            postalCode: postalCode || null,
+            postalCode: postalCode,
             latitude: place.location?.latitude,
             longitude: place.location?.longitude,
             googleMapsUrl: place.googleMapsUri,
-            rating: place.rating || null,
-            userRatingCount: place.userRatingCount || null,
-            phone: place.nationalPhoneNumber || null,
+            rating,
+            userRatingCount,
+            phone,
             internationalPhone: place.internationalPhoneNumber || null,
-            website: place.websiteUri || null,
+            website,
             businessStatus: place.businessStatus || 'OPERATIONAL',
             reviewOpportunityScore: scoreResult.score,
             leadGrade: scoreResult.leadGrade,
-            locality: payload.localityName || null,
+            locality: localityName,
             discoverySource: strategyResult.strategyName,
           },
         });

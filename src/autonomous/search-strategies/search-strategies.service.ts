@@ -14,6 +14,25 @@ export interface StrategyExecutionResult {
   targetCoordinate?: { lat: number; lng: number };
 }
 
+// Complete rich fields required by QR Review Studio
+const FULL_DISCOVERY_FIELDS = [
+  'name',
+  'formattedAddress',
+  'addressComponents',
+  'latitude',
+  'longitude',
+  'types',
+  'primaryType',
+  'googleMapsUrl',
+  'phone',
+  'internationalPhone',
+  'website',
+  'rating',
+  'userRatingCount',
+  'openingHours',
+  'businessStatus',
+];
+
 @Injectable()
 export class SearchStrategiesService {
   private readonly logger = new Logger(SearchStrategiesService.name);
@@ -25,8 +44,8 @@ export class SearchStrategiesService {
 
   /**
    * Strategy A: Nearby Search with DISTANCE Ranking
-   * Supports maximum of 20 results (no pagination in Places API New).
    * Surfaces nearest neighbourhood entities without Google's review popularity bias.
+   * Fetches phone number, website, rating, reviews, address components and status directly.
    */
   async executeNearbyDistanceStrategy(
     lat: number,
@@ -43,11 +62,11 @@ export class SearchStrategiesService {
       includedTypes: types,
       rankPreference: 'DISTANCE',
       maxResultCount: 20, // Strict Google Places API New ceiling
-      selectedFields: ['name', 'formattedAddress', 'latitude', 'longitude', 'primaryType', 'types'],
+      selectedFields: FULL_DISCOVERY_FIELDS,
     });
 
-    const costUSD = this.pricingConfig.getCostUSD('NEARBY_SEARCH_ESSENTIALS');
-    const costINR = this.pricingConfig.getCostINR('NEARBY_SEARCH_ESSENTIALS');
+    const costUSD = this.pricingConfig.getCostUSD('NEARBY_SEARCH_PRO');
+    const costINR = this.pricingConfig.getCostINR('NEARBY_SEARCH_PRO');
     const isSaturated = result.places.length >= 20;
 
     return {
@@ -65,7 +84,7 @@ export class SearchStrategiesService {
   /**
    * Strategy B: Locality-Based Text Search
    * Combines granular residential colonies and categories to trigger Google's locality index.
-   * Can page through results up to 3 pages (60 places).
+   * Surfaces small neighbourhood businesses in specific residential sectors and markets.
    */
   async executeLocalityTextStrategy(
     localityName: string,
@@ -80,7 +99,7 @@ export class SearchStrategiesService {
       textQuery: query,
       location: coordBias ? { lat: coordBias.lat, lng: coordBias.lng, radiusMeters: 3000 } : undefined,
       maxResultCount: 20,
-      selectedFields: ['name', 'formattedAddress', 'latitude', 'longitude', 'primaryType', 'types'],
+      selectedFields: FULL_DISCOVERY_FIELDS,
     });
 
     const costUSD = this.pricingConfig.getCostUSD('TEXT_SEARCH_PRO');
@@ -118,11 +137,11 @@ export class SearchStrategiesService {
       includedTypes: [granularType],
       rankPreference: 'DISTANCE',
       maxResultCount: 20,
-      selectedFields: ['name', 'formattedAddress', 'latitude', 'longitude', 'primaryType', 'types'],
+      selectedFields: FULL_DISCOVERY_FIELDS,
     });
 
-    const costUSD = this.pricingConfig.getCostUSD('NEARBY_SEARCH_ESSENTIALS');
-    const costINR = this.pricingConfig.getCostINR('NEARBY_SEARCH_ESSENTIALS');
+    const costUSD = this.pricingConfig.getCostUSD('NEARBY_SEARCH_PRO');
+    const costINR = this.pricingConfig.getCostINR('NEARBY_SEARCH_PRO');
 
     return {
       strategyName: 'GRANULAR_CATEGORY',
@@ -158,7 +177,7 @@ export class SearchStrategiesService {
 
     const alternatives = contextualKeywordMap[categoryType] || ['local service store', 'specialist care center'];
     const selectedKeyword = alternatives[Math.floor(Math.random() * alternatives.length)];
-    const query = `${selectedKeyword} ${locality}`;
+    const query = `${selectedKeyword} in ${locality}, Lucknow`;
 
     this.logger.log(`[Strategy D: Contextual Keyword] Query: "${query}"`);
 
@@ -166,7 +185,7 @@ export class SearchStrategiesService {
       textQuery: query,
       location: coordBias ? { lat: coordBias.lat, lng: coordBias.lng, radiusMeters: 4000 } : undefined,
       maxResultCount: 20,
-      selectedFields: ['name', 'formattedAddress', 'latitude', 'longitude', 'primaryType', 'types'],
+      selectedFields: FULL_DISCOVERY_FIELDS,
     });
 
     const costUSD = this.pricingConfig.getCostUSD('TEXT_SEARCH_PRO');
