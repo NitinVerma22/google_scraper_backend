@@ -1,4 +1,5 @@
-import { Controller, Post, Get, Param, Query, Body, UseGuards, Sse, MessageEvent } from '@nestjs/common';
+import { Response } from 'express';
+import { Controller, Post, Get, Param, Query, Body, UseGuards, Sse, MessageEvent, Res } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { map } from 'rxjs/operators';
 import { Observable } from 'rxjs';
@@ -69,4 +70,22 @@ export class JobsController {
       } as MessageEvent)),
     );
   }
+
+  @Get(':id/export')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Instantly download leads of a specific collection job as CSV or Excel' })
+  async exportJobLeads(
+    @Param('id') id: string,
+    @Query('format') format: string = 'csv',
+    @Res() res: Response,
+  ) {
+    const normFormat = (format || 'csv').toUpperCase() as 'CSV' | 'XLSX';
+    const exportData = await this.jobsService.exportJobLeads(id, normFormat);
+    res.setHeader('Content-Type', exportData.mimeType);
+    res.setHeader('Content-Disposition', `attachment; filename="${exportData.fileName}"`);
+    res.setHeader('Content-Length', exportData.buffer.length);
+    res.send(exportData.buffer);
+  }
+
 }

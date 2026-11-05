@@ -1,3 +1,5 @@
+import * as ExcelJS from 'exceljs';
+import { stringify } from 'csv-stringify/sync';
 import { Injectable, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CollectorService } from '../collector/collector.service';
@@ -188,4 +190,109 @@ export class JobsService {
     await this.collectorService.startJobExecution(jobId);
     return { success: true, message: 'Job retry initiated' };
   }
+
+  async exportJobLeads(jobId: string, format: 'CSV' | 'XLSX') {
+    const job = await this.prisma.collectionJob.findUnique({
+      where: { id: jobId },
+    });
+
+    if (!job) {
+      throw new NotFoundException(`Job with ID ${jobId} not found`);
+    }
+
+    const jobResults = await this.prisma.jobResult.findMany({
+      where: { jobId },
+      include: {
+        businessRecord: true,
+      },
+      orderBy: {
+        businessRecord: {
+          reviewOpportunityScore: 'desc',
+        },
+      },
+    });
+
+    const records = jobResults.map((jr) => jr.businessRecord);
+
+    const rows = records.map((rec) => ({
+      'Business Name': rec.name || '',
+      'Phone Number': rec.phone || rec.internationalPhone || '',
+      'Rating': rec.rating !== null && rec.rating !== undefined ? rec.rating : '',
+      'Total Reviews': rec.userRatingCount !== null && rec.userRatingCount !== undefined ? rec.userRatingCount : 0,
+      'Opportunity Score': rec.reviewOpportunityScore !== null && rec.reviewOpportunityScore !== undefined ? rec.reviewOpportunityScore : '',
+      'Lead Grade': rec.leadGrade || '',
+      'Category': rec.primaryType || '',
+      'Locality': rec.locality || '',
+      'City': rec.city || '',
+      'State': rec.state || '',
+      'Postal Code': rec.postalCode || '',
+      'Address': rec.formattedAddress || '',
+      'Website': rec.website || 'No Website (Counter Only)',
+      'Google Maps URL': rec.googleMapsUrl || '',
+      'Business Status': rec.businessStatus || '',
+    }));
+
+    const sanitizedJobName = (job.name || 'collection')
+      .toLowerCase()
+      .replace(/[^a-z0-9]/g, '_')
+      .replace(/_+/g, '_')
+      .replace(/^_|_$/g, '');
+    const timestamp = Date.now();
+    const fileName = `${sanitizedJobName}_leads_${timestamp}.${format.toLowerCase()}`;
+
+    if (format === 'CSV') {
+      const csvString = stringify(rows, { header: true });
+      const buffer = Buffer.from(csvString, 'utf-8');
+      return {
+        buffer,
+        fileName,
+        mimeType: 'text/csv',
+        recordCount: records.length,
+      };
+    } else {
+      const workbook = new ExcelJS.Workbook();
+      const worksheet = workbook.addWorksheet('Collection Leads');
+
+      worksheet.columns = [
+        { header: 'Business Name', key: 'Business Name', width: 28 },
+        { header: 'Phone Number', key: 'Phone Number', width: 18 },
+        { header: 'Rating', key: 'Rating', width: 10 },
+        { header: 'Total Reviews', key: 'Total Reviews', width: 14 },
+        { header: 'Opportunity Score', key: 'Opportunity Score', width: 18 },
+        { header: 'Lead Grade', key: 'Lead Grade', width: 14 },
+        { header: 'Category', key: 'Category', width: 20 },
+        { header: 'Locality', key: 'Locality', width: 18 },
+        { header: 'City', key: 'City', width: 15 },
+        { header: 'State', key: 'State', width: 15 },
+        { header: 'Postal Code', key: 'Postal Code', width: 14 },
+        { header: 'Address', key: 'Address', width: 40 },
+        { header: 'Website', key: 'Website', width: 25 },
+        { header: 'Google Maps URL', key: 'Google Maps URL', width: 35 },
+        { header: 'Business Status', key: 'Business Status', width: 16 },
+      ];
+
+      const headerRow = worksheet.getRow(1);
+      headerRow.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+      headerRow.fill = {
+        type: 'pattern',
+        pattern: 'solid',
+        fgColor: { argb: 'FF4F46E5' },
+      };
+      headerRow.alignment = { vertical: 'middle', horizontal: 'center' };
+
+      for (const row of rows) {
+        worksheet.addRow(row);
+      }
+
+      const rawBuffer = await workbook.xlsx.writeBuffer();
+      const buffer = Buffer.from(rawBuffer);
+      return {
+        buffer,
+        fileName,
+        mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        recordCount: records.length,
+      };
+    }
+  }
+
 }
